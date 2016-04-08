@@ -1,3 +1,5 @@
+/*将ASCII转换成整int，再转成字符串，通过时间函数转成时间戳*/
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
