@@ -1,0 +1,1283 @@
+                        .module iap.c
+                        .area text(rom, con, rel)
+ 0000                   .dbfile iap.c
+                        .area data(ram, con, rel)
+ 0000                   .dbfile iap.c
+ 0000           _startupString::
+ 0000                   .blkb 39
+                        .area idata
+ 0000 54797065732027642720646F776E6C6F  .byte 'T,'y,'p,'e,'s,32,39,'d,39,32,'d,'o,'w,'n,'l,'o
+ 0010 61642C204F74686572732072756E2061  .byte 'a,'d,44,32,'O,'t,'h,'e,'r,'s,32,'r,'u,'n,32,'a
+ 0020 70702E0A0D0000    .byte 'p,'p,46,10,13,0,0
+                        .area data(ram, con, rel)
+ 0027                   .dbfile iap.c
+ 0027                   .dbfile C:\Users\Administrator\Desktop\IAP\IAP\iap.c
+ 0027                   .dbsym e startupString _startupString A[39:39]c
+ 0027           _address::
+ 0027                   .blkb 4
+                        .area idata
+ 0027 00000000          .word 0,0
+                        .area data(ram, con, rel)
+ 002B                   .dbfile C:\Users\Administrator\Desktop\IAP\IAP\iap.c
+ 002B                   .dbsym e address _address L
+                        .area text(rom, con, rel)
+ 0000                   .dbfile C:\Users\Administrator\Desktop\IAP\IAP\iap.c
+ 0000                   .dbfunc e wait_page_rw_ok _wait_page_rw_ok fV
+                        .even
+ 0000           _wait_page_rw_ok::
+ 0000                   .dbline -1
+ 0000                   .dbline 36
+ 0000           ; /*****************************************************
+ 0000           ;  采用串行接口实现Boot_load应用的实例
+ 0000           ;  Compiler: ICC-AVR 7.22
+ 0000           ;  Target: Mega88
+ 0000           ;  Crystal: 8Mhz
+ 0000           ;  Used: T/C0,USART0
+ 0000           ;  *****************************************************/
+ 0000           ; #include <iom88v.h>
+ 0000           ; #include <macros.h>
+ 0000           ; #include <AVRdef.h>      //中断函数头文件
+ 0000           ; 
+ 0000           ; #define SPM_PAGESIZE 64 //M88的一个Flash页为64字节(32字)
+ 0000           ; #define BAUD 9600 //波特率采用9600bps
+ 0000           ; 
+ 0000           ; 
+ 0000           ; #define BAUD_H 0x00
+ 0000           ; #define BAUD_L 0x0C  
+ 0000           ;               
+ 0000           ; //定义Xmoden控制字符
+ 0000           ; #define XMODEM_NUL 0x00
+ 0000           ; #define XMODEM_SOH 0x01
+ 0000           ; #define XMODEM_STX 0x02
+ 0000           ; #define XMODEM_EOT 0x04
+ 0000           ; #define XMODEM_ACK 0x06
+ 0000           ; #define XMODEM_NAK 0x15
+ 0000           ; #define XMODEM_CAN 0x18
+ 0000           ; #define XMODEM_EOF 0x1A
+ 0000           ; #define XMODEM_RECIEVING_WAIT_CHAR 'C'
+ 0000           ; //定义全局变量
+ 0000           ; unsigned char startupString[]="Types 'd' download, Others run app.\n\r\0";
+ 0000           ; char data[128];
+ 0000           ; long address = 0;
+ 0000           ; 
+ 0000           ; //等待一个Flash页的写完成
+ 0000           ;  void wait_page_rw_ok(void)
+ 0000           ;  { 
+ 0000 06C0              xjmp L3
+ 0002           L5:
+ 0002                   .dbline 38
+ 0002           ;  while(SPMCSR & (1<<RWWSB)) {   
+ 0002           ;         while(SPMCSR & (1<<SPMEN));   
+ 0002           L6:
+ 0002                   .dbline 38
+ 0002 27B6              in R2,0x37
+ 0004 20FC              sbrc R2,0
+ 0006 FDCF              rjmp L5
+ 0008           X0:
+ 0008                   .dbline 39
+ 0008           ;         SPMCSR = 0x11;   
+ 0008 81E1              ldi R24,17
+ 000A 87BF              out 0x37,R24
+ 000C                   .dbline 40
+ 000C           ;         asm("spm ");   
+ 000C E895              spm 
+ 000E                   .dbline 41
+ 000E           ;     }   
+ 000E           L3:
+ 000E                   .dbline 37
+ 000E 27B6              in R2,0x37
+ 0010 26FC              sbrc R2,6
+ 0012 F7CF              rjmp L6
+ 0014           X1:
+ 0014                   .dbline -2
+ 0014           L1:
+ 0014                   .dbline 0 ; func end
+ 0014 0895              ret
+ 0016                   .dbend
+ 0016                   .dbfunc e boot_page_ew _boot_page_ew fV
+ 0016           ;           code -> R10
+ 0016           ;      p_address -> y+1
+                        .even
+ 0016           _boot_page_ew::
+ 0016 0E940000          xcall push_arg4
+ 001A AA92              st -y,R10
+ 001C AD80              ldd R10,y+5
+ 001E                   .dbline -1
+ 001E                   .dbline 46
+ 001E           ;  }
+ 001E           ; 
+ 001E           ; //擦除(code=0x03)和写入(code=0x05)一个Flash页
+ 001E           ; void boot_page_ew(long p_address,char code)
+ 001E           ;  { 
+ 001E                   .dbline 47
+ 001E           ;     asm("movw r30,  r16"); //将页地址放入Z寄存器和RAMPZ的Bit0中  
+ 001E F801              movw r30,  r16
+ 0020                   .dbline 49
+ 0020           ;       //same as asm("mov r30,r16\n""mov r31,r17\n""out 0x3b,r18\n"); 
+ 0020           ;     SPMCSR = code;   
+ 0020 A7BE              out 0x37,R10
+ 0022                   .dbline 50
+ 0022           ;     asm("spm");   
+ 0022 E895              spm
+ 0024                   .dbline 52
+ 0024           ;    
+ 0024           ;     wait_page_rw_ok();
+ 0024 EDDF              xcall _wait_page_rw_ok
+ 0026                   .dbline -2
+ 0026           L8:
+ 0026                   .dbline 0 ; func end
+ 0026 A990              ld R10,y+
+ 0028 2496              adiw R28,4
+ 002A 0895              ret
+ 002C                   .dbsym r code 10 c
+ 002C                   .dbsym l p_address 1 L
+ 002C                   .dbend
+ 002C                   .dbfunc e boot_page_fill _boot_page_fill fV
+ 002C           ;          rdata -> <dead>
+ 002C           ;        address -> <dead>
+                        .even
+ 002C           _boot_page_fill::
+ 002C 0E940000          xcall push_arg4
+ 0030                   .dbline -1
+ 0030                   .dbline 57
+ 0030           ;  }
+ 0030           ;  
+ 0030           ; //填充Flash缓冲页中的一个字
+ 0030           ;  void boot_page_fill(unsigned int address,int rdata)
+ 0030           ;  { 
+ 0030                   .dbline 58
+ 0030           ;     asm("movw r30,r16");   
+ 0030 F801              movw r30,r16
+ 0032                   .dbline 59
+ 0032           ;     asm("movw r0,r18"); 
+ 0032 0901              movw r0,r18
+ 0034                   .dbline 62
+ 0034           ;       //same as asm("mov r30,r16\n""mov r31,r17\n" //Z寄存器中为填冲页内地址 
+ 0034           ;       //"mov r0,r18\n""mov r1,r19\n");  //R0R1中为一个指令字   
+ 0034           ;     SPMCSR = 0x01;   
+ 0034 81E0              ldi R24,1
+ 0036 87BF              out 0x37,R24
+ 0038                   .dbline 63
+ 0038           ;     asm("spm");           
+ 0038 E895              spm
+ 003A                   .dbline -2
+ 003A           L9:
+ 003A                   .dbline 0 ; func end
+ 003A 2496              adiw R28,4
+ 003C 0895              ret
+ 003E                   .dbsym l rdata 2 I
+ 003E                   .dbsym l address 0 i
+ 003E                   .dbend
+ 003E                   .dbfunc e write_one_page _write_one_page fV
+ 003E           ;              i -> R20,R21
+                        .even
+ 003E           _write_one_page::
+ 003E 0E940000          xcall push_xgset300C
+ 0042 2197              sbiw R28,1
+ 0044                   .dbline -1
+ 0044                   .dbline 68
+ 0044           ;  }
+ 0044           ;  
+ 0044           ;  //更新一个Flash页的完整处理 因为一个页64Byte 所以需要写两次
+ 0044           ; void write_one_page(void)
+ 0044           ;  { 
+ 0044                   .dbline 70
+ 0044           ;       int i; 
+ 0044           ;       boot_page_ew(address, 0x03); //擦除一个Flash页 
+ 0044 83E0              ldi R24,3
+ 0046 8883              std y+0,R24
+ 0048 20912900          lds R18,_address+2
+ 004C 30912A00          lds R19,_address+2+1
+ 0050 00912700          lds R16,_address
+ 0054 10912800          lds R17,_address+1
+ 0058 DEDF              xcall _boot_page_ew
+ 005A                   .dbline 71
+ 005A           ;       wait_page_rw_ok(); //等待擦除完成 
+ 005A D2DF              xcall _wait_page_rw_ok
+ 005C                   .dbline 72
+ 005C           ;       for(i = 0;i < SPM_PAGESIZE; i += 2) //将数据填入Flash缓冲页中 
+ 005C 4427              clr R20
+ 005E 5527              clr R21
+ 0060           L11:
+ 0060                   .dbline 73
+ 0060           ;       { 
+ 0060                   .dbline 74
+ 0060           ;            boot_page_fill(i, (data[i] + (data[i+1]<<8))); 
+ 0060 80E0              ldi R24,<_data+1
+ 0062 90E0              ldi R25,>_data+1
+ 0064 FA01              movw R30,R20
+ 0066 E80F              add R30,R24
+ 0068 F91F              adc R31,R25
+ 006A 2080              ldd R2,z+0
+ 006C 3324              clr R3
+ 006E 322C              mov R3,R2
+ 0070 2224              clr R2
+ 0072 80E0              ldi R24,<_data
+ 0074 90E0              ldi R25,>_data
+ 0076 FA01              movw R30,R20
+ 0078 E80F              add R30,R24
+ 007A F91F              adc R31,R25
+ 007C 2081              ldd R18,z+0
+ 007E 3327              clr R19
+ 0080 220D              add R18,R2
+ 0082 331D              adc R19,R3
+ 0084 8A01              movw R16,R20
+ 0086 D2DF              xcall _boot_page_fill
+ 0088                   .dbline 75
+ 0088           ;       } 
+ 0088           L12:
+ 0088                   .dbline 72
+ 0088 4E5F              subi R20,254  ; offset = 2
+ 008A 5F4F              sbci R21,255
+ 008C                   .dbline 72
+ 008C 4034              cpi R20,64
+ 008E E0E0              ldi R30,0
+ 0090 5E07              cpc R21,R30
+ 0092 34F3              brlt L11
+ 0094           X2:
+ 0094                   .dbline 76
+ 0094           ;       boot_page_ew(address,0x05); //将缓冲页数据写入一个Flash页 
+ 0094 85E0              ldi R24,5
+ 0096 8883              std y+0,R24
+ 0098 20912900          lds R18,_address+2
+ 009C 30912A00          lds R19,_address+2+1
+ 00A0 00912700          lds R16,_address
+ 00A4 10912800          lds R17,_address+1
+ 00A8 B6DF              xcall _boot_page_ew
+ 00AA                   .dbline 77
+ 00AA           ;       wait_page_rw_ok(); //等待写入完成
+ 00AA AADF              xcall _wait_page_rw_ok
+ 00AC                   .dbline 78
+ 00AC           ;         address += SPM_PAGESIZE; //Flash页加1
+ 00AC 80E4              ldi R24,64
+ 00AE 90E0              ldi R25,0
+ 00B0 A0E0              ldi R26,0
+ 00B2 B0E0              ldi R27,0
+ 00B4 40902900          lds R4,_address+2
+ 00B8 50902A00          lds R5,_address+2+1
+ 00BC 20902700          lds R2,_address
+ 00C0 30902800          lds R3,_address+1
+ 00C4 280E              add R2,R24
+ 00C6 391E              adc R3,R25
+ 00C8 4A1E              adc R4,R26
+ 00CA 5B1E              adc R5,R27
+ 00CC 30922800          sts _address+1,R3
+ 00D0 20922700          sts _address,R2
+ 00D4 50922A00          sts _address+2+1,R5
+ 00D8 40922900          sts _address+2,R4
+ 00DC                   .dbline 80
+ 00DC           ;         
+ 00DC           ;        boot_page_ew(address, 0x03); //擦除一个Flash页 
+ 00DC 83E0              ldi R24,3
+ 00DE 8883              std y+0,R24
+ 00E0 8101              movw R16,R2
+ 00E2 9201              movw R18,R4
+ 00E4 98DF              xcall _boot_page_ew
+ 00E6                   .dbline 81
+ 00E6           ;         wait_page_rw_ok(); //等待擦除完成 
+ 00E6 8CDF              xcall _wait_page_rw_ok
+ 00E8                   .dbline 82
+ 00E8           ;         for (i = SPM_PAGESIZE; i < 128; i += 2) //将数据填入Flash缓冲页中 
+ 00E8 40E4              ldi R20,64
+ 00EA 50E0              ldi R21,0
+ 00EC           L16:
+ 00EC                   .dbline 83
+ 00EC           ;         {
+ 00EC                   .dbline 84
+ 00EC           ;                 boot_page_fill(i, (data[i] + (data[i + 1] << 8)));
+ 00EC 80E0              ldi R24,<_data+1
+ 00EE 90E0              ldi R25,>_data+1
+ 00F0 FA01              movw R30,R20
+ 00F2 E80F              add R30,R24
+ 00F4 F91F              adc R31,R25
+ 00F6 2080              ldd R2,z+0
+ 00F8 3324              clr R3
+ 00FA 322C              mov R3,R2
+ 00FC 2224              clr R2
+ 00FE 80E0              ldi R24,<_data
+ 0100 90E0              ldi R25,>_data
+ 0102 FA01              movw R30,R20
+ 0104 E80F              add R30,R24
+ 0106 F91F              adc R31,R25
+ 0108 2081              ldd R18,z+0
+ 010A 3327              clr R19
+ 010C 220D              add R18,R2
+ 010E 331D              adc R19,R3
+ 0110 8A01              movw R16,R20
+ 0112 8CDF              xcall _boot_page_fill
+ 0114                   .dbline 85
+ 0114           ;         }
+ 0114           L17:
+ 0114                   .dbline 82
+ 0114 4E5F              subi R20,254  ; offset = 2
+ 0116 5F4F              sbci R21,255
+ 0118                   .dbline 82
+ 0118 4038              cpi R20,128
+ 011A E0E0              ldi R30,0
+ 011C 5E07              cpc R21,R30
+ 011E 34F3              brlt L16
+ 0120           X3:
+ 0120                   .dbline 86
+ 0120           ;         boot_page_ew(address, 0x05); //将缓冲页数据写入一个Flash页 
+ 0120 85E0              ldi R24,5
+ 0122 8883              std y+0,R24
+ 0124 20912900          lds R18,_address+2
+ 0128 30912A00          lds R19,_address+2+1
+ 012C 00912700          lds R16,_address
+ 0130 10912800          lds R17,_address+1
+ 0134 70DF              xcall _boot_page_ew
+ 0136                   .dbline 87
+ 0136           ;         wait_page_rw_ok(); //等待写入完成     
+ 0136 64DF              xcall _wait_page_rw_ok
+ 0138                   .dbline 88
+ 0138           ;         address += SPM_PAGESIZE;  //Flash页加1 
+ 0138 80E4              ldi R24,64
+ 013A 90E0              ldi R25,0
+ 013C A0E0              ldi R26,0
+ 013E B0E0              ldi R27,0
+ 0140 40902900          lds R4,_address+2
+ 0144 50902A00          lds R5,_address+2+1
+ 0148 20902700          lds R2,_address
+ 014C 30902800          lds R3,_address+1
+ 0150 280E              add R2,R24
+ 0152 391E              adc R3,R25
+ 0154 4A1E              adc R4,R26
+ 0156 5B1E              adc R5,R27
+ 0158 30922800          sts _address+1,R3
+ 015C 20922700          sts _address,R2
+ 0160 50922A00          sts _address+2+1,R5
+ 0164 40922900          sts _address+2,R4
+ 0168                   .dbline -2
+ 0168           L10:
+ 0168                   .dbline 0 ; func end
+ 0168 2196              adiw R28,1
+ 016A 0C940000          xjmp pop_xgset300C
+ 016E                   .dbsym r i 20 I
+ 016E                   .dbend
+ 016E                   .dbfunc e uart_putchar _uart_putchar fV
+ 016E           ;              c -> R16
+                        .even
+ 016E           _uart_putchar::
+ 016E                   .dbline -1
+ 016E                   .dbline 93
+ 016E           ;  }
+ 016E           ;  
+ 016E           ;  //从RS232发送一个字节
+ 016E           ;  void uart_putchar(char c)
+ 016E           ;  { 
+ 016E           L22:
+ 016E                   .dbline 94
+ 016E           ;       while(!(UCSR0A & 0x20)); 
+ 016E           L23:
+ 016E                   .dbline 94
+ 016E 2090C000          lds R2,192
+ 0172 25FE              sbrs R2,5
+ 0174 FCCF              rjmp L22
+ 0176           X4:
+ 0176                   .dbline 95
+ 0176           ;       UDR0 = c;
+ 0176 0093C600          sts 198,R16
+ 017A                   .dbline -2
+ 017A           L21:
+ 017A                   .dbline 0 ; func end
+ 017A 0895              ret
+ 017C                   .dbsym r c 16 c
+ 017C                   .dbend
+ 017C                   .dbfunc e uart_getchar _uart_getchar fI
+ 017C           ;            res -> R16
+ 017C           ;         status -> R18
+                        .even
+ 017C           _uart_getchar::
+ 017C                   .dbline -1
+ 017C                   .dbline 100
+ 017C           ;  }
+ 017C           ;  
+ 017C           ;  //从RS232接收一个字节
+ 017C           ;  int uart_getchar(void)
+ 017C           ;  { 
+ 017C                   .dbline 102
+ 017C           ;       unsigned char status,res; 
+ 017C           ;       if(!(UCSR0A & 0x80))
+ 017C 2090C000          lds R2,192
+ 0180 27FC              sbrc R2,7
+ 0182 03C0              rjmp L26
+ 0184           X5:
+ 0184                   .dbline 103
+ 0184           ;          return -1; //no data to be received 
+ 0184 0FEF              ldi R16,-1
+ 0186 1FEF              ldi R17,-1
+ 0188 0BC0              xjmp L25
+ 018A           L26:
+ 018A                   .dbline 104
+ 018A           ;       status = UCSR0A; 
+ 018A 2091C000          lds R18,192
+ 018E                   .dbline 105
+ 018E           ;       res = UDR0; 
+ 018E 0091C600          lds R16,198
+ 0192                   .dbline 106
+ 0192           ;       if (status & 0x1c) 
+ 0192 822F              mov R24,R18
+ 0194 8C71              andi R24,28
+ 0196 19F0              breq L28
+ 0198           X6:
+ 0198                   .dbline 107
+ 0198           ;          return -1; // If error, return -1 
+ 0198 0FEF              ldi R16,-1
+ 019A 1FEF              ldi R17,-1
+ 019C 01C0              xjmp L25
+ 019E           L28:
+ 019E                   .dbline 108
+ 019E           ;       return res;
+ 019E 1127              clr R17
+ 01A0                   .dbline -2
+ 01A0           L25:
+ 01A0                   .dbline 0 ; func end
+ 01A0 0895              ret
+ 01A2                   .dbsym r res 16 c
+ 01A2                   .dbsym r status 18 c
+ 01A2                   .dbend
+ 01A2                   .dbfunc e uart_waitchar _uart_waitchar fc
+ 01A2           ;              c -> R10,R11
+                        .even
+ 01A2           _uart_waitchar::
+ 01A2 AA92              st -y,R10
+ 01A4 BA92              st -y,R11
+ 01A6                   .dbline -1
+ 01A6                   .dbline 113
+ 01A6           ;  }
+ 01A6           ;  
+ 01A6           ;  //等待从RS232接收一个有效的字节
+ 01A6           ;  char uart_waitchar(void)
+ 01A6           ;  { 
+ 01A6           L31:
+ 01A6                   .dbline 115
+ 01A6           ;       int c; 
+ 01A6           ;       while((c = uart_getchar()) == -1); 
+ 01A6           L32:
+ 01A6                   .dbline 115
+ 01A6 EADF              xcall _uart_getchar
+ 01A8 5801              movw R10,R16
+ 01AA 0F3F              cpi R16,255
+ 01AC EFEF              ldi R30,255
+ 01AE 1E07              cpc R17,R30
+ 01B0 D1F3              breq L31
+ 01B2           X7:
+ 01B2                   .dbline 116
+ 01B2           ;       return (char)c;
+ 01B2                   .dbline -2
+ 01B2           L30:
+ 01B2                   .dbline 0 ; func end
+ 01B2 B990              ld R11,y+
+ 01B4 A990              ld R10,y+
+ 01B6 0895              ret
+ 01B8                   .dbsym r c 10 I
+ 01B8                   .dbend
+ 01B8                   .dbfunc e calcrc _calcrc fI
+ 01B8           ;              i -> R20
+ 01B8           ;            crc -> R10,R11
+ 01B8           ;          count -> R18,R19
+ 01B8           ;            ptr -> R16,R17
+                        .even
+ 01B8           _calcrc::
+ 01B8 0E940000          xcall push_xgset300C
+ 01BC                   .dbline -1
+ 01BC                   .dbline 121
+ 01BC           ;  }
+ 01BC           ;  
+ 01BC           ;  //计算CRC
+ 01BC           ;  int calcrc(char *ptr, int count)
+ 01BC           ;  { 
+ 01BC                   .dbline 122
+ 01BC           ;       int crc = 0; 
+ 01BC AA24              clr R10
+ 01BE BB24              clr R11
+ 01C0 1BC0              xjmp L36
+ 01C2           L35:
+ 01C2                   .dbline 125
+ 01C2           ;       char i; 
+ 01C2           ;       while (--count >= 0) 
+ 01C2           ;       { 
+ 01C2                   .dbline 126
+ 01C2           ;             crc = crc ^ (int) *ptr++ << 8; 
+ 01C2 F801              movw R30,R16
+ 01C4 2190              ld R2,Z+
+ 01C6 8F01              movw R16,R30
+ 01C8 3324              clr R3
+ 01CA 322C              mov R3,R2
+ 01CC 2224              clr R2
+ 01CE A224              eor R10,R2
+ 01D0 B324              eor R11,R3
+ 01D2                   .dbline 127
+ 01D2           ;             i = 8; 
+ 01D2 48E0              ldi R20,8
+ 01D4           L38:
+ 01D4                   .dbline 129
+ 01D4           ;             do 
+ 01D4           ;             { 
+ 01D4                   .dbline 130
+ 01D4           ;                   if (crc & 0x8000) 
+ 01D4 B7FE              sbrs R11,7
+ 01D6 09C0              rjmp L41
+ 01D8           X8:
+ 01D8                   .dbline 131
+ 01D8           ;                         crc = crc << 1 ^ 0x1021; 
+ 01D8 81E2              ldi R24,4129
+ 01DA 90E1              ldi R25,16
+ 01DC 1501              movw R2,R10
+ 01DE 220C              lsl R2
+ 01E0 331C              rol R3
+ 01E2 2826              eor R2,R24
+ 01E4 3926              eor R3,R25
+ 01E6 5101              movw R10,R2
+ 01E8 02C0              xjmp L42
+ 01EA           L41:
+ 01EA                   .dbline 133
+ 01EA           ;                   else 
+ 01EA           ;                         crc = crc << 1; 
+ 01EA AA0C              lsl R10
+ 01EC BB1C              rol R11
+ 01EE           L42:
+ 01EE                   .dbline 134
+ 01EE           ;             } while(--i); 
+ 01EE           L39:
+ 01EE                   .dbline 134
+ 01EE 842F              mov R24,R20
+ 01F0 8150              subi R24,1
+ 01F2 482F              mov R20,R24
+ 01F4 4423              tst R20
+ 01F6 71F7              brne L38
+ 01F8           X9:
+ 01F8                   .dbline 135
+ 01F8           ;       } 
+ 01F8           L36:
+ 01F8                   .dbline 124
+ 01F8 C901              movw R24,R18
+ 01FA 0197              sbiw R24,1
+ 01FC 9C01              movw R18,R24
+ 01FE 2030              cpi R18,0
+ 0200 E0E0              ldi R30,0
+ 0202 3E07              cpc R19,R30
+ 0204 F4F6              brge L35
+ 0206           X10:
+ 0206                   .dbline 136
+ 0206           ;       return (crc);
+ 0206 8501              movw R16,R10
+ 0208                   .dbline -2
+ 0208           L34:
+ 0208                   .dbline 0 ; func end
+ 0208 0C940000          xjmp pop_xgset300C
+ 020C                   .dbsym r i 20 c
+ 020C                   .dbsym r crc 10 I
+ 020C                   .dbsym r count 18 I
+ 020C                   .dbsym r ptr 16 pc
+ 020C                   .dbend
+ 020C                   .dbfunc e quit _quit fV
+                        .even
+ 020C           _quit::
+ 020C                   .dbline -1
+ 020C                   .dbline 141
+ 020C           ;  }
+ 020C           ;  
+ 020C           ; //退出Bootloader程序，从0x0000处执行应用程序
+ 020C           ;  void quit(void)
+ 020C           ;  { 
+ 020C                   .dbline 142
+ 020C           ;       uart_putchar('O');uart_putchar('K'); 
+ 020C 0FE4              ldi R16,79
+ 020E AFDF              xcall _uart_putchar
+ 0210                   .dbline 142
+ 0210 0BE4              ldi R16,75
+ 0212 ADDF              xcall _uart_putchar
+ 0214                   .dbline 143
+ 0214           ;       uart_putchar(0x0d);uart_putchar(0x0a);
+ 0214 0DE0              ldi R16,13
+ 0216 ABDF              xcall _uart_putchar
+ 0218                   .dbline 143
+ 0218 0AE0              ldi R16,10
+ 021A A9DF              xcall _uart_putchar
+ 021C           L44:
+ 021C                   .dbline 144
+ 021C           ;       while(!(UCSR0A & 0x20)); //等待结束提示信息回送完成 
+ 021C           L45:
+ 021C                   .dbline 144
+ 021C 2090C000          lds R2,192
+ 0220 25FE              sbrs R2,5
+ 0222 FCCF              rjmp L44
+ 0224           X11:
+ 0224                   .dbline 145
+ 0224           ;       MCUCR = 0x01; 
+ 0224 81E0              ldi R24,1
+ 0226 85BF              out 0x35,R24
+ 0228                   .dbline 146
+ 0228           ;       MCUCR = 0x00; //将中断向量表迁移到应用程序区头部 
+ 0228 2224              clr R2
+ 022A 25BE              out 0x35,R2
+ 022C                   .dbline 149
+ 022C           ;       //RAMPZ = 0x00; //RAMPZ清零初始化 mega88没有RAMPZ寄存器
+ 022C           ;      // asm("jmp 0x0000 "); //跳转到Flash的0x0000处，执行用户的应用程序
+ 022C           ;        asm("LDI R30,0X00\n"   //LDI 装入立即数
+ 022C E0E0              LDI R30,0X00
+ 022E F0E0              LDI R31,0X00
+ 0230 0994              ijmp
+ 0232                   
+ 0232                   .dbline -2
+ 0232           L43:
+ 0232                   .dbline 0 ; func end
+ 0232 0895              ret
+ 0234                   .dbend
+ 0234                   .dbfunc e timer0_init _timer0_init fV
+                        .even
+ 0234           _timer0_init::
+ 0234                   .dbline -1
+ 0234                   .dbline 160
+ 0234           ;      "LDI R31,0X00\n"     //z寄存器初始化
+ 0234           ;        "ijmp\n");         //跳转到Flash 0x0000处，执行用户应用程序
+ 0234           ;  }
+ 0234           ;  
+ 0234           ; //TIMER0 initialize - prescale:256
+ 0234           ; // WGM: Normal
+ 0234           ; // desired value: 1MHz
+ 0234           ; // actual value:  0.000MHz (800000100.0%)
+ 0234           ; // 实现20ms延时
+ 0234           ; void timer0_init(void)
+ 0234           ; {
+ 0234                   .dbline 162
+ 0234           ;  //SREG = 0x80; //使能全局中断
+ 0234           ;  TCCR0B = 0x00; //stop
+ 0234 2224              clr R2
+ 0236 25BC              out 0x25,R2
+ 0238                   .dbline 163
+ 0238           ;  TCNT0 = 0xB3; //set count 0xB2 = 179  4E->78
+ 0238 83EB              ldi R24,179
+ 023A 86BD              out 0x26,R24
+ 023C                   .dbline 166
+ 023C           ;  //定时器频率=1M/256=3906.25
+ 023C           ;  //定时器初始值设置，定时时间=（256-178+1）/3906.25=0.020224s=20ms
+ 023C           ;  TCCR0A = 0x00; 
+ 023C 24BC              out 0x24,R2
+ 023E                   .dbline 167
+ 023E           ;  TCCR0B = 0x04; //start timer 0x04 ->256分频
+ 023E 84E0              ldi R24,4
+ 0240 85BD              out 0x25,R24
+ 0242                   .dbline 168
+ 0242           ;  TIMSK0 = 0x01; //enable timer 0 overflow interrupt
+ 0242 81E0              ldi R24,1
+ 0244 80936E00          sts 110,R24
+ 0248                   .dbline -2
+ 0248           L47:
+ 0248                   .dbline 0 ; func end
+ 0248 0895              ret
+ 024A                   .dbend
+                        .area data(ram, con, rel)
+ 002B                   .dbfile C:\Users\Administrator\Desktop\IAP\IAP\iap.c
+ 002B           _counter::
+ 002B                   .blkb 2
+                        .area idata
+ 002B 0000              .word 0
+                        .area data(ram, con, rel)
+ 002D                   .dbfile C:\Users\Administrator\Desktop\IAP\IAP\iap.c
+ 002D                   .dbsym e counter _counter I
+ 002D           _onesecond::
+ 002D                   .blkb 2
+                        .area idata
+ 002D 0000              .word 0
+                        .area data(ram, con, rel)
+ 002F                   .dbfile C:\Users\Administrator\Desktop\IAP\IAP\iap.c
+ 002F                   .dbsym e onesecond _onesecond I
+ 002F           _my_count::
+ 002F                   .blkb 2
+                        .area idata
+ 002F 0000              .word 0
+                        .area data(ram, con, rel)
+ 0031                   .dbfile C:\Users\Administrator\Desktop\IAP\IAP\iap.c
+ 0031                   .dbsym e my_count _my_count I
+                        .area vector(rom, abs)
+                        .org 64
+ 0040 0C942501          jmp _timer0_ovf_isr
+                        .area data(ram, con, rel)
+ 0031                   .dbfile C:\Users\Administrator\Desktop\IAP\IAP\iap.c
+                        .area text(rom, con, rel)
+ 024A                   .dbfile C:\Users\Administrator\Desktop\IAP\IAP\iap.c
+ 024A                   .dbfunc e timer0_ovf_isr _timer0_ovf_isr fV
+                        .even
+ 024A           _timer0_ovf_isr::
+ 024A 2A92              st -y,R2
+ 024C 3A92              st -y,R3
+ 024E 8A93              st -y,R24
+ 0250 9A93              st -y,R25
+ 0252 AA93              st -y,R26
+ 0254 EA93              st -y,R30
+ 0256 2FB6              IN R2,63
+ 0258 2A92              st -y,R2
+ 025A                   .dbline -1
+ 025A                   .dbline 177
+ 025A           ; }
+ 025A           ; 
+ 025A           ; int counter = 0; //1s计数变量清零
+ 025A           ; int onesecond = 0; //1s
+ 025A           ; int my_count = 0;
+ 025A           ; 
+ 025A           ; #pragma interrupt_handler timer0_ovf_isr:iv_TIM0_OVF
+ 025A           ; void timer0_ovf_isr(void)
+ 025A           ; {
+ 025A                   .dbline 178
+ 025A           ;   TCNT0 = 0xB3; //179
+ 025A 83EB              ldi R24,179
+ 025C 86BD              out 0x26,R24
+ 025E                   .dbline 179
+ 025E           ;   if(++counter >= 50)   //定时时间1s 20ms*50=1000ms=1s
+ 025E 80912B00          lds R24,_counter
+ 0262 90912C00          lds R25,_counter+1
+ 0266 0196              adiw R24,1
+ 0268 90932C00          sts _counter+1,R25
+ 026C 80932B00          sts _counter,R24
+ 0270 8233              cpi R24,50
+ 0272 E0E0              ldi R30,0
+ 0274 9E07              cpc R25,R30
+ 0276 64F0              brlt L49
+ 0278           X12:
+ 0278                   .dbline 180
+ 0278           ;   {    
+ 0278                   .dbline 181
+ 0278           ;     counter = 0;
+ 0278 2224              clr R2
+ 027A 3324              clr R3
+ 027C 30922C00          sts _counter+1,R3
+ 0280 20922B00          sts _counter,R2
+ 0284                   .dbline 182
+ 0284           ;       onesecond = 1;
+ 0284 81E0              ldi R24,1
+ 0286 90E0              ldi R25,0
+ 0288 90932E00          sts _onesecond+1,R25
+ 028C 80932D00          sts _onesecond,R24
+ 0290                   .dbline 183
+ 0290           ;   }
+ 0290           L49:
+ 0290                   .dbline -2
+ 0290           L48:
+ 0290                   .dbline 0 ; func end
+ 0290 2990              ld R2,y+
+ 0292 2FBE              OUT 63,R2
+ 0294 E991              ld R30,y+
+ 0296 A991              ld R26,y+
+ 0298 9991              ld R25,y+
+ 029A 8991              ld R24,y+
+ 029C 3990              ld R3,y+
+ 029E 2990              ld R2,y+
+ 02A0 1895              reti
+ 02A2                   .dbend
+ 02A2                   .dbfunc e port_init _port_init fV
+                        .even
+ 02A2           _port_init::
+ 02A2                   .dbline -1
+ 02A2                   .dbline 187
+ 02A2           ; }
+ 02A2           ; 
+ 02A2           ; void port_init(void)
+ 02A2           ; {
+ 02A2                   .dbline 188
+ 02A2           ;  PORTB = 0x00;
+ 02A2 2224              clr R2
+ 02A4 25B8              out 0x5,R2
+ 02A6                   .dbline 189
+ 02A6           ;  DDRB  = 0x00;
+ 02A6 24B8              out 0x4,R2
+ 02A8                   .dbline 190
+ 02A8           ;  PORTC = 0x00; //m103 output only
+ 02A8 28B8              out 0x8,R2
+ 02AA                   .dbline 191
+ 02AA           ;  DDRC  = 0x00;
+ 02AA 27B8              out 0x7,R2
+ 02AC                   .dbline 192
+ 02AC           ;  PORTD = 0x00;
+ 02AC 2BB8              out 0xb,R2
+ 02AE                   .dbline 193
+ 02AE           ;  DDRD  = 0x00;
+ 02AE 2AB8              out 0xa,R2
+ 02B0                   .dbline -2
+ 02B0           L51:
+ 02B0                   .dbline 0 ; func end
+ 02B0 0895              ret
+ 02B2                   .dbend
+ 02B2                   .dbfunc e uart_init _uart_init fV
+                        .even
+ 02B2           _uart_init::
+ 02B2                   .dbline -1
+ 02B2                   .dbline 197
+ 02B2           ; }
+ 02B2           ; 
+ 02B2           ; void uart_init(void)
+ 02B2           ; {
+ 02B2                   .dbline 199
+ 02B2           ;  //初始化M88的USART0 
+ 02B2           ;   UBRR0H = BAUD_H; 
+ 02B2 2224              clr R2
+ 02B4 2092C500          sts 197,R2
+ 02B8                   .dbline 200
+ 02B8           ;   UBRR0L = BAUD_L; //Set baud rate 
+ 02B8 8CE0              ldi R24,12
+ 02BA 8093C400          sts 196,R24
+ 02BE                   .dbline 201
+ 02BE           ;   UCSR0B = 0x18; //Enable Receiver and Transmitter 
+ 02BE 88E1              ldi R24,24
+ 02C0 8093C100          sts 193,R24
+ 02C4                   .dbline 202
+ 02C4           ;   UCSR0C = 0x0E; //Set frame format: 8data, 2stop bit 
+ 02C4 8EE0              ldi R24,14
+ 02C6 8093C200          sts 194,R24
+ 02CA                   .dbline 203
+ 02CA           ;   UCSR0A = 0x02;
+ 02CA 82E0              ldi R24,2
+ 02CC 8093C000          sts 192,R24
+ 02D0                   .dbline -2
+ 02D0           L52:
+ 02D0                   .dbline 0 ; func end
+ 02D0 0895              ret
+ 02D2                   .dbend
+ 02D2                   .dbfunc e init_devices _init_devices fV
+                        .even
+ 02D2           _init_devices::
+ 02D2                   .dbline -1
+ 02D2                   .dbline 208
+ 02D2           ; }
+ 02D2           ; 
+ 02D2           ; //call this routine to initialize all peripherals
+ 02D2           ; void init_devices(void)
+ 02D2           ; {
+ 02D2                   .dbline 210
+ 02D2           ;  //stop errant interrupts until set up
+ 02D2           ;  CLI(); //disable all interrupts
+ 02D2 F894              cli
+ 02D4                   .dbline 211
+ 02D4           ;  port_init();
+ 02D4 E6DF              xcall _port_init
+ 02D6                   .dbline 213
+ 02D6           ; 
+ 02D6           ;  MCUCR = 0x00;
+ 02D6 2224              clr R2
+ 02D8 25BE              out 0x35,R2
+ 02DA                   .dbline 214
+ 02DA           ;  EICRA = 0x00; //extended ext ints
+ 02DA 20926900          sts 105,R2
+ 02DE                   .dbline 215
+ 02DE           ;  EIMSK = 0x00;
+ 02DE 2DBA              out 0x1d,R2
+ 02E0                   .dbline 217
+ 02E0           ;  
+ 02E0           ;  TIMSK0 = 0x00; //timer 0 interrupt sources
+ 02E0 20926E00          sts 110,R2
+ 02E4                   .dbline 218
+ 02E4           ;  TIMSK1 = 0x00; //timer 1 interrupt sources
+ 02E4 20926F00          sts 111,R2
+ 02E8                   .dbline 219
+ 02E8           ;  TIMSK2 = 0x00; //timer 2 interrupt sources
+ 02E8 20927000          sts 112,R2
+ 02EC                   .dbline 221
+ 02EC           ;  
+ 02EC           ;  PCMSK0 = 0x00; //pin change mask 0 
+ 02EC 20926B00          sts 107,R2
+ 02F0                   .dbline 222
+ 02F0           ;  PCMSK1 = 0x00; //pin change mask 1 
+ 02F0 20926C00          sts 108,R2
+ 02F4                   .dbline 223
+ 02F4           ;  PCMSK2 = 0x00; //pin change mask 2
+ 02F4 20926D00          sts 109,R2
+ 02F8                   .dbline 224
+ 02F8           ;  PCICR = 0x00; //pin change enable 
+ 02F8 20926800          sts 104,R2
+ 02FC                   .dbline 225
+ 02FC           ;  PRR = 0x00; //power controller
+ 02FC 20926400          sts 100,R2
+ 0300                   .dbline 226
+ 0300           ;  SEI(); //re-enable interrupts
+ 0300 7894              sei
+ 0302                   .dbline 228
+ 0302           ;  
+ 0302           ;  uart_init();
+ 0302 D7DF              xcall _uart_init
+ 0304                   .dbline 229
+ 0304           ;  timer0_init();
+ 0304                   .dbline -2
+ 0304           L53:
+ 0304                   .dbline 0 ; func end
+ 0304 97CF              xjmp _timer0_init
+ 0306                   .dbend
+ 0306                   .dbfunc e main _main fV
+ 0306           ;     timercount -> R12
+ 0306           ;            crc -> R10,R11
+ 0306           ;              p -> R12,R13
+ 0306           ;         packNO -> R22
+ 0306           ;    bufferPoint -> R20,R21
+ 0306           ;              i -> R10,R11
+                        .even
+ 0306           _main::
+ 0306                   .dbline -1
+ 0306                   .dbline 234
+ 0306           ; }
+ 0306           ; 
+ 0306           ;  //主程序
+ 0306           ;  void main(void)
+ 0306           ;  { 
+ 0306                   .dbline 235
+ 0306           ;      int i = 0; 
+ 0306 AA24              clr R10
+ 0308 BB24              clr R11
+ 030A                   .dbline 236
+ 030A           ;      unsigned char timercount = 0; 
+ 030A                   .dbline 237
+ 030A           ;      unsigned char packNO = 1; 
+ 030A 61E0              ldi R22,1
+ 030C                   .dbline 238
+ 030C           ;      int bufferPoint = 0; 
+ 030C 4427              clr R20
+ 030E 5527              clr R21
+ 0310                   .dbline 243
+ 0310           ;      unsigned int crc; 
+ 0310           ; 
+ 0310           ;        unsigned char *p;
+ 0310           ;         
+ 0310           ;        init_devices(); //初始化所有状态
+ 0310 E0DF              xcall _init_devices
+ 0312                   .dbline 246
+ 0312           ;         
+ 0312           ;        //向PC机发送开始提示信息  
+ 0312           ;        p = startupString;
+ 0312 80E0              ldi R24,<_startupString
+ 0314 90E0              ldi R25,>_startupString
+ 0316 6C01              movw R12,R24
+ 0318 04C0              xjmp L56
+ 031A           L55:
+ 031A                   .dbline 248
+ 031A           ;        while(*p != '\0') 
+ 031A           ;      { 
+ 031A                   .dbline 249
+ 031A           ;         uart_putchar(*p++); 
+ 031A F601              movw R30,R12
+ 031C 0191              ld R16,Z+
+ 031E 6F01              movw R12,R30
+ 0320 26DF              xcall _uart_putchar
+ 0322                   .dbline 250
+ 0322           ;      } 
+ 0322           L56:
+ 0322                   .dbline 247
+ 0322 F601              movw R30,R12
+ 0324 2080              ldd R2,z+0
+ 0326 2220              tst R2
+ 0328 C1F7              brne L55
+ 032A           X13:
+ 032A 26C0              xjmp L59
+ 032C           L58:
+ 032C                   .dbline 254
+ 032C           ;  
+ 032C           ;      //3秒种等待PC下发"d"，否则退出Bootloader程序，从0x0000处执行应用程序 
+ 032C           ;      while(1) 
+ 032C           ;       { 
+ 032C                   .dbline 255
+ 032C           ;          if(uart_getchar()== 'd') break; 
+ 032C 27DF              xcall _uart_getchar
+ 032E 0436              cpi R16,100
+ 0330 E0E0              ldi R30,0
+ 0332 1E07              cpc R17,R30
+ 0334 09F4              brne L61
+ 0336           X14:
+ 0336                   .dbline 255
+ 0336 31C0              xjmp L68
+ 0338           L61:
+ 0338                   .dbline 257
+ 0338           ; 
+ 0338           ;                if(onesecond == 1)
+ 0338 80912D00          lds R24,_onesecond
+ 033C 90912E00          lds R25,_onesecond+1
+ 0340 8130              cpi R24,1
+ 0342 E0E0              ldi R30,0
+ 0344 9E07              cpc R25,R30
+ 0346 C1F4              brne L63
+ 0348           X15:
+ 0348                   .dbline 258
+ 0348           ;            {
+ 0348                   .dbline 259
+ 0348           ;              onesecond = 0;
+ 0348 2224              clr R2
+ 034A 3324              clr R3
+ 034C 30922E00          sts _onesecond+1,R3
+ 0350 20922D00          sts _onesecond,R2
+ 0354                   .dbline 260
+ 0354           ;              my_count++;
+ 0354 80912F00          lds R24,_my_count
+ 0358 90913000          lds R25,_my_count+1
+ 035C 0196              adiw R24,1
+ 035E 90933000          sts _my_count+1,R25
+ 0362 80932F00          sts _my_count,R24
+ 0366                   .dbline 261
+ 0366           ;              if(my_count == 3)  //延时3s
+ 0366 8330              cpi R24,3
+ 0368 E0E0              ldi R30,0
+ 036A 9E07              cpc R25,R30
+ 036C 29F4              brne L65
+ 036E           X16:
+ 036E                   .dbline 262
+ 036E           ;               {
+ 036E                   .dbline 263
+ 036E           ;                    my_count = 0;
+ 036E 30923000          sts _my_count+1,R3
+ 0372 20922F00          sts _my_count,R2
+ 0376                   .dbline 264
+ 0376           ;                quit();
+ 0376 4ADF              xcall _quit
+ 0378                   .dbline 265
+ 0378           ;               }
+ 0378           L65:
+ 0378                   .dbline 266
+ 0378           ;             }
+ 0378           L63:
+ 0378                   .dbline 267
+ 0378           ;       } 
+ 0378           L59:
+ 0378                   .dbline 253
+ 0378 D9CF              xjmp L58
+ 037A           L67:
+ 037A                   .dbline 270
+ 037A           ;       //每秒向PC机发送一个控制字符"C"，等待控制字〈soh〉 
+ 037A           ;       while(uart_getchar() != XMODEM_SOH) //receive the start of Xmodem 
+ 037A           ;       {               
+ 037A                   .dbline 271
+ 037A           ;               if(onesecond == 1)
+ 037A 80912D00          lds R24,_onesecond
+ 037E 90912E00          lds R25,_onesecond+1
+ 0382 8130              cpi R24,1
+ 0384 E0E0              ldi R30,0
+ 0386 9E07              cpc R25,R30
+ 0388 41F4              brne L70
+ 038A           X17:
+ 038A                   .dbline 272
+ 038A           ;            {
+ 038A                   .dbline 273
+ 038A           ;              onesecond = 0;
+ 038A 2224              clr R2
+ 038C 3324              clr R3
+ 038E 30922E00          sts _onesecond+1,R3
+ 0392 20922D00          sts _onesecond,R2
+ 0396                   .dbline 274
+ 0396           ;              uart_putchar(XMODEM_RECIEVING_WAIT_CHAR); //send a "C"
+ 0396 03E4              ldi R16,67
+ 0398 EADE              xcall _uart_putchar
+ 039A                   .dbline 275
+ 039A           ;          }
+ 039A           L70:
+ 039A                   .dbline 276
+ 039A           ;         } 
+ 039A           L68:
+ 039A                   .dbline 269
+ 039A F0DE              xcall _uart_getchar
+ 039C 0130              cpi R16,1
+ 039E E0E0              ldi R30,0
+ 03A0 1E07              cpc R17,R30
+ 03A2 59F7              brne L67
+ 03A4           X18:
+ 03A4           L72:
+ 03A4                   .dbline 279
+ 03A4           ;       //开始接收数据块 
+ 03A4           ;       do 
+ 03A4           ;       { 
+ 03A4                   .dbline 280
+ 03A4           ;             if ((packNO == uart_waitchar()) && (packNO ==(~uart_waitchar()))) 
+ 03A4 FEDE              xcall _uart_waitchar
+ 03A6 C02E              mov R12,R16
+ 03A8 6017              cp R22,R16
+ 03AA 09F0              breq X27
+ 03AC 4FC0              xjmp L75
+ 03AE           X27:
+ 03AE           X19:
+ 03AE F9DE              xcall _uart_waitchar
+ 03B0 C02E              mov R12,R16
+ 03B2 2C2C              mov R2,R12
+ 03B4 2094              com R2
+ 03B6 6215              cp R22,R2
+ 03B8 09F0              breq X28
+ 03BA 48C0              xjmp L75
+ 03BC           X28:
+ 03BC           X20:
+ 03BC                   .dbline 281
+ 03BC           ;               { //核对数据块编号正确 
+ 03BC                   .dbline 282
+ 03BC           ;                   for(i=0; i < 128; i++) //接收128个字节数据 
+ 03BC AA24              clr R10
+ 03BE BB24              clr R11
+ 03C0           L77:
+ 03C0                   .dbline 283
+ 03C0           ;                   { 
+ 03C0                   .dbline 284
+ 03C0           ;                                        data[bufferPoint] = uart_waitchar();
+ 03C0 F0DE              xcall _uart_waitchar
+ 03C2 C02E              mov R12,R16
+ 03C4 80E0              ldi R24,<_data
+ 03C6 90E0              ldi R25,>_data
+ 03C8 FA01              movw R30,R20
+ 03CA E80F              add R30,R24
+ 03CC F91F              adc R31,R25
+ 03CE C082              std z+0,R12
+ 03D0                   .dbline 285
+ 03D0           ;                      bufferPoint++; 
+ 03D0 4F5F              subi R20,255  ; offset = 1
+ 03D2 5F4F              sbci R21,255
+ 03D4                   .dbline 286
+ 03D4           ;                   } 
+ 03D4           L78:
+ 03D4                   .dbline 282
+ 03D4 C501              movw R24,R10
+ 03D6 0196              adiw R24,1
+ 03D8 5C01              movw R10,R24
+ 03DA                   .dbline 282
+ 03DA 8038              cpi R24,128
+ 03DC E0E0              ldi R30,0
+ 03DE 9E07              cpc R25,R30
+ 03E0 7CF3              brlt L77
+ 03E2           X21:
+ 03E2                   .dbline 287
+ 03E2           ;                   crc = (uart_waitchar()<<8); 
+ 03E2 DFDE              xcall _uart_waitchar
+ 03E4 A02E              mov R10,R16
+ 03E6 2A2C              mov R2,R10
+ 03E8 3324              clr R3
+ 03EA 322C              mov R3,R2
+ 03EC 2224              clr R2
+ 03EE 5101              movw R10,R2
+ 03F0                   .dbline 288
+ 03F0           ;                   crc += uart_waitchar(); //接收2个字节的CRC效验字
+ 03F0 D8DE              xcall _uart_waitchar
+ 03F2 C02E              mov R12,R16
+ 03F4 2C2C              mov R2,R12
+ 03F6 3324              clr R3
+ 03F8 A20C              add R10,R2
+ 03FA B31C              adc R11,R3
+ 03FC                   .dbline 290
+ 03FC           ; 
+ 03FC           ;                   if(calcrc(data, 128) == crc) //CRC校验验证 
+ 03FC 20E8              ldi R18,128
+ 03FE 30E0              ldi R19,0
+ 0400 00E0              ldi R16,<_data
+ 0402 10E0              ldi R17,>_data
+ 0404 D9DE              xcall _calcrc
+ 0406 6801              movw R12,R16
+ 0408 0A15              cp R16,R10
+ 040A 1B05              cpc R17,R11
+ 040C E1F4              brne L81
+ 040E           X22:
+ 040E                   .dbline 291
+ 040E           ;                   { //正确接收128个字节数据 
+ 040E                   .dbline 292
+ 040E           ;                                         if((address < 0xC00) && (bufferPoint >= 128)) //0xC00 以上为 bootloader区  //正确接受128个字节的数据 
+ 040E 80E0              ldi R24,0
+ 0410 9CE0              ldi R25,12
+ 0412 A0E0              ldi R26,0
+ 0414 B0E0              ldi R27,0
+ 0416 40902900          lds R4,_address+2
+ 041A 50902A00          lds R5,_address+2+1
+ 041E 20902700          lds R2,_address
+ 0422 30902800          lds R3,_address+1
+ 0426 2816              cp R2,R24
+ 0428 3906              cpc R3,R25
+ 042A 4A06              cpc R4,R26
+ 042C 5B06              cpc R5,R27
+ 042E 3CF4              brge L83
+ 0430           X23:
+ 0430 4038              cpi R20,128
+ 0432 E0E0              ldi R30,0
+ 0434 5E07              cpc R21,R30
+ 0436 1CF0              brlt L83
+ 0438           X24:
+ 0438                   .dbline 293
+ 0438           ;                        {  
+ 0438                   .dbline 294
+ 0438           ;                                                 write_one_page(); //收到128字节写入一页Flash中 
+ 0438 02DE              xcall _write_one_page
+ 043A                   .dbline 295
+ 043A           ;                                                 bufferPoint = 0;
+ 043A 4427              clr R20
+ 043C 5527              clr R21
+ 043E                   .dbline 296
+ 043E           ;                        }
+ 043E           L83:
+ 043E                   .dbline 297
+ 043E           ;                         uart_putchar(XMODEM_ACK); //正确收到一个数据块 
+ 043E 06E0              ldi R16,6
+ 0440 96DE              xcall _uart_putchar
+ 0442                   .dbline 298
+ 0442           ;                         packNO++; //数据块编号加1 
+ 0442 6395              inc R22
+ 0444                   .dbline 299
+ 0444           ;                   } 
+ 0444 05C0              xjmp L76
+ 0446           L81:
+ 0446                   .dbline 301
+ 0446           ;                   else 
+ 0446           ;                   { 
+ 0446                   .dbline 302
+ 0446           ;                         uart_putchar(XMODEM_NAK); //要求重发数据块 
+ 0446 05E1              ldi R16,21
+ 0448 92DE              xcall _uart_putchar
+ 044A                   .dbline 303
+ 044A           ;                   } 
+ 044A                   .dbline 304
+ 044A           ;             } 
+ 044A 02C0              xjmp L76
+ 044C           L75:
+ 044C                   .dbline 306
+ 044C           ;             else 
+ 044C           ;             { 
+ 044C                   .dbline 307
+ 044C           ;                  uart_putchar(XMODEM_NAK); //要求重发数据块 
+ 044C 05E1              ldi R16,21
+ 044E 8FDE              xcall _uart_putchar
+ 0450                   .dbline 308
+ 0450           ;             } 
+ 0450           L76:
+ 0450                   .dbline 309
+ 0450           ;       }while(uart_waitchar() != XMODEM_EOT); //循环接收，直到全部发完 
+ 0450           L73:
+ 0450                   .dbline 309
+ 0450 A8DE              xcall _uart_waitchar
+ 0452 A02E              mov R10,R16
+ 0454 0430              cpi R16,4
+ 0456 09F0              breq X29
+ 0458 A5CF              xjmp L72
+ 045A           X29:
+ 045A           X25:
+ 045A                   .dbline 310
+ 045A           ;       uart_putchar(XMODEM_ACK); //通知PC机全部收到 
+ 045A 06E0              ldi R16,6
+ 045C 88DE              xcall _uart_putchar
+ 045E                   .dbline 312
+ 045E           ;         
+ 045E           ;       if(bufferPoint)
+ 045E 4030              cpi R20,0
+ 0460 4507              cpc R20,R21
+ 0462 09F0              breq L85
+ 0464           X26:
+ 0464                   .dbline 313
+ 0464           ;         {
+ 0464                   .dbline 314
+ 0464           ;           write_one_page(); //把剩余的数据写入Flash中 
+ 0464 ECDD              xcall _write_one_page
+ 0466                   .dbline 315
+ 0466           ;         }
+ 0466           L85:
+ 0466                   .dbline 316
+ 0466           ;       quit(); //退出Bootloader程序，从0x0000处执行应用程序  
+ 0466                   .dbline -2
+ 0466           L54:
+ 0466                   .dbline 0 ; func end
+ 0466 D2CE              xjmp _quit
+ 0468                   .dbsym r timercount 12 c
+ 0468                   .dbsym r crc 10 i
+ 0468                   .dbsym r p 12 pc
+ 0468                   .dbsym r packNO 22 c
+ 0468                   .dbsym r bufferPoint 20 I
+ 0468                   .dbsym r i 10 I
+ 0468                   .dbend
+                        .area bss(ram, con, rel)
+ 0000                   .dbfile C:\Users\Administrator\Desktop\IAP\IAP\iap.c
+ 0000           _data::
+ 0000                   .blkb 128
+ 0080                   .dbsym e data _data A[128:128]c
+ 0080           ;  }

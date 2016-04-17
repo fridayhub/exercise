@@ -1,0 +1,9 @@
+This is tcp/ip module use select function.
+
+Embended linux kernel is linux-2.6.39.3
+
+some drivers base on S3C2416 board,led,beep.
+
+uart use /dev/ttySAC0 
+
+could use uart read board ip and set board ip save as /etc/upsip file

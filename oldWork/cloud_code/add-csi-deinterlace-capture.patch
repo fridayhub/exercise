@@ -1,0 +1,857 @@
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index d017ed1..d07cbe7 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -1487,6 +1487,7 @@ CONFIG_MXC_CAMERA_OV5642=m
+ CONFIG_MXC_TVIN_ADV7180=m
+ CONFIG_MXC_IPU_PRP_VF_SDC=m
+ CONFIG_MXC_IPU_PRP_ENC=m
++CONFIG_MXC_IPU_VDI_ENC=m
+ CONFIG_MXC_IPU_CSI_ENC=m
+ CONFIG_VIDEO_MXC_OUTPUT=y
+ CONFIG_VIDEO_MXC_IPU_OUTPUT=y
+diff --git a/drivers/media/video/mxc/capture/Kconfig b/drivers/media/video/mxc/capture/Kconfig
+index 3b2d90f..f5832c9 100644
+--- a/drivers/media/video/mxc/capture/Kconfig
++++ b/drivers/media/video/mxc/capture/Kconfig
+@@ -136,6 +136,15 @@ config MXC_IPU_CSI_ENC
+ 	  Use case IPU_CSI_ENC:
+ 		Get raw image with CSI from smart sensor for encoder.
+ 		CSI -> MEM
++
++config MXC_IPU_VDI_ENC
++	tristate "VDI Encoder library"
++	depends on VIDEO_MXC_IPU_CAMERA
++	default y
++	---help---
++	  Use case IPU_VDI_ENC:
++		Deinterlace image from CSI from smart sensor for encoder.
++		CSI -> VDI -> MEM
+ endmenu
+ 
+ endif
+diff --git a/drivers/media/video/mxc/capture/Makefile b/drivers/media/video/mxc/capture/Makefile
+index 8dab021..4aaec18 100644
+--- a/drivers/media/video/mxc/capture/Makefile
++++ b/drivers/media/video/mxc/capture/Makefile
+@@ -1,6 +1,7 @@
+ ifeq ($(CONFIG_VIDEO_MXC_IPU_CAMERA),y)
+ 	obj-$(CONFIG_VIDEO_MXC_CAMERA) += mxc_v4l2_capture.o
+ 	obj-$(CONFIG_MXC_IPU_PRP_VF_SDC) += ipu_prp_vf_sdc.o ipu_prp_vf_sdc_bg.o
++	obj-$(CONFIG_MXC_IPU_VDI_ENC) += ipu_vdi_enc.o ipu_still.o
+ 	obj-$(CONFIG_MXC_IPU_PRP_ENC) += ipu_prp_enc.o ipu_still.o
+ 	obj-$(CONFIG_MXC_IPU_CSI_ENC) += ipu_csi_enc.o ipu_still.o
+ endif
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_sw.h b/drivers/media/video/mxc/capture/ipu_prp_sw.h
+index 85dd102..95a7d87 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_sw.h
++++ b/drivers/media/video/mxc/capture/ipu_prp_sw.h
+@@ -26,6 +26,8 @@ int csi_enc_select(void *private);
+ int csi_enc_deselect(void *private);
+ int prp_enc_select(void *private);
+ int prp_enc_deselect(void *private);
++int vdi_enc_select(void *private);
++int vdi_enc_deselect(void *private);
+ int prp_vf_sdc_select(void *private);
+ int prp_vf_sdc_select_bg(void *private);
+ int prp_vf_sdc_deselect(void *private);
+diff --git a/drivers/media/video/mxc/capture/ipu_vdi_enc.c b/drivers/media/video/mxc/capture/ipu_vdi_enc.c
+new file mode 100644
+index 0000000..f6089aa
+--- /dev/null
++++ b/drivers/media/video/mxc/capture/ipu_vdi_enc.c
+@@ -0,0 +1,682 @@
++/*
++ * Copyright 2004-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file ipu_vdi_enc.c
++ *
++ * @brief IPU Use case for VDI-ENC
++ *
++ * @ingroup IPU
++ */
++
++#include <linux/dma-mapping.h>
++#include <linux/platform_device.h>
++#include <linux/ipu.h>
++#include <mach/devices-common.h>
++#include "mxc_v4l2_capture.h"
++
++#ifdef CAMERA_DBG
++	#define CAMERA_TRACE(x) (printk)x
++#else
++	#define CAMERA_TRACE(x)
++#endif
++
++
++/*
++ * Function definitions
++ */
++
++static void vdi_work_func(struct work_struct *work)
++{
++
++    int err;
++    cam_data *cam = (cam_data *)  container_of(work, cam_data, vdi_work);
++
++    if(!cam->vdi_enc_first_frame)
++    {
++
++        err = ipu_update_channel_buffer(cam->ipu, MEM_VDI_PRP_VF_MEM_P,
++                IPU_INPUT_BUFFER, 0,
++                cam->vdi_enc_bufs[(cam->ping_pong_vdi + 2) %3] +
++                cam->v2f.fmt.pix.bytesperline);
++
++        if (err != 0) {
++            ipu_clear_buffer_ready(cam->ipu, MEM_VDI_PRP_VF_MEM_P,
++                    IPU_INPUT_BUFFER,
++                    0);
++            err = ipu_update_channel_buffer(cam->ipu, MEM_VDI_PRP_VF_MEM_P,
++                    IPU_INPUT_BUFFER,
++                    0,
++                    cam->vdi_enc_bufs[(cam->ping_pong_vdi + 2) %3] +
++                    cam->v2f.fmt.pix.bytesperline);
++
++            if (err != 0) {
++                pr_err("ERROR: v4l2 capture: fail to update vdi P buffer");
++                return;
++            }
++        }
++
++        err = ipu_update_channel_buffer(cam->ipu, MEM_VDI_PRP_VF_MEM,
++                IPU_INPUT_BUFFER, 0,
++                cam->vdi_enc_bufs[cam->ping_pong_vdi]);
++
++        if (err != 0) {
++            ipu_clear_buffer_ready(cam->ipu, MEM_VDI_PRP_VF_MEM,
++                    IPU_INPUT_BUFFER,
++                    0);
++            err = ipu_update_channel_buffer(cam->ipu, MEM_VDI_PRP_VF_MEM,
++                    IPU_INPUT_BUFFER,
++                    0,
++                    cam->vdi_enc_bufs[cam->ping_pong_vdi]);
++
++            if (err != 0) {
++                pr_err("ERROR: v4l2 capture: fail to update vdi buffer");
++                return;
++            }
++        }
++
++        err = ipu_update_channel_buffer(cam->ipu, MEM_VDI_PRP_VF_MEM_N,
++                IPU_INPUT_BUFFER, 0,
++                cam->vdi_enc_bufs[cam->ping_pong_vdi]+
++                cam->v2f.fmt.pix.bytesperline);
++
++        if (err != 0) {
++            ipu_clear_buffer_ready(cam->ipu, MEM_VDI_PRP_VF_MEM_N,
++                    IPU_INPUT_BUFFER,
++                    0);
++            err = ipu_update_channel_buffer(cam->ipu, MEM_VDI_PRP_VF_MEM_N,
++                    IPU_INPUT_BUFFER,
++                    0,
++                    cam->vdi_enc_bufs[cam->ping_pong_vdi] +
++                    cam->v2f.fmt.pix.bytesperline);
++
++            if (err != 0) {
++                pr_err("ERROR: v4l2 capture: fail to update vdi N buffer");
++                return;
++            }
++        }
++        ipu_select_multi_vdi_buffer(cam->ipu, 0);
++    }
++
++    cam->vdi_enc_first_frame = 0;
++    cam->ping_pong_vdi = (cam->ping_pong_vdi + 1)%3;
++    //Point the CSI output to the next buffer
++    err = ipu_update_channel_buffer(cam->ipu, CSI_MEM,
++            IPU_OUTPUT_BUFFER, 0,
++            cam->vdi_enc_bufs[cam->ping_pong_vdi]);
++
++    if (err != 0) {
++        ipu_clear_buffer_ready(cam->ipu, CSI_MEM,
++                IPU_OUTPUT_BUFFER,
++                0);
++        err = ipu_update_channel_buffer(cam->ipu, CSI_MEM,
++                IPU_OUTPUT_BUFFER, 0,
++                cam->vdi_enc_bufs[cam->ping_pong_vdi]);
++
++        if (err != 0) {
++            pr_err("ERROR: v4l2 capture: fail to update CSI buffer");
++            return;
++        }
++    }
++    ipu_select_buffer(cam->ipu, CSI_MEM, IPU_OUTPUT_BUFFER,
++            0);
++}
++
++/*!
++ * IPU ENC callback function.
++ *
++ * @param irq       int irq line
++ * @param dev_id    void * device id
++ *
++ * @return status   IRQ_HANDLED for handled
++ */
++static irqreturn_t vdi_enc_callback(int irq, void *dev_id)
++{
++	cam_data *cam = (cam_data *) dev_id;
++
++	if (cam->enc_callback == NULL)
++		return IRQ_HANDLED;
++
++	cam->enc_callback(irq, dev_id);
++
++	return IRQ_HANDLED;
++}
++
++
++
++/*!
++ * IPU ENC callback function for CSI->Mem.
++ *
++ * @param irq       int irq line
++ * @param dev_id    void * device id
++ *
++ * @return status   IRQ_HANDLED for handled
++ */
++static irqreturn_t csi_enc_callback(int irq, void *dev_id)
++{
++    cam_data *cam = (cam_data *) dev_id;
++
++    if (queue_work(cam->vdi_wq, &cam->vdi_work) == 0) {
++        pr_debug( "vdi work was in queue already\n");
++    }
++
++    return IRQ_HANDLED;
++}
++
++
++/*!
++ * VDI-ENC enable channel setup function
++ *
++ * @param cam       struct cam_data * mxc capture instance
++ *
++ * @return  status
++ */
++static int vdi_enc_setup(cam_data *cam)
++{
++	ipu_channel_params_t csi;
++	ipu_channel_params_t enc;
++	int err = 0;
++	dma_addr_t dummy = 0xdeadbeaf;
++
++	CAMERA_TRACE("In vdi_enc_setup\n");
++	if (!cam) {
++		printk(KERN_ERR "cam private is NULL\n");
++		return -ENXIO;
++	}
++	memset(&enc, 0, sizeof(ipu_channel_params_t));
++	memset(&csi, 0, sizeof(ipu_channel_params_t));
++
++        //Setup CSI to memory parameters
++        csi.csi_mem.csi = cam->csi;
++
++        switch (ipu_csi_get_sensor_protocol(cam->ipu, cam->csi)) {
++            case IPU_CSI_CLK_MODE_CCIR656_INTERLACED:
++            case IPU_CSI_CLK_MODE_CCIR1120_INTERLACED_DDR:
++            case IPU_CSI_CLK_MODE_CCIR1120_INTERLACED_SDR:
++                csi.csi_mem.interlaced = true;
++                break;
++            default:
++                printk(KERN_ERR "sensor protocol unsupported\n");
++                return -EINVAL;
++        }
++
++
++	ipu_csi_get_window_size(cam->ipu, &enc.mem_prp_vf_mem.in_width,
++				&enc.mem_prp_vf_mem.in_height, cam->csi);
++
++        //Configure VDI prp channel
++	enc.mem_prp_vf_mem.out_width = cam->v2f.fmt.pix.width;
++	enc.mem_prp_vf_mem.out_height = cam->v2f.fmt.pix.height;
++
++	if (cam->v2f.fmt.pix.pixelformat == V4L2_PIX_FMT_YUV420) {
++		enc.mem_prp_vf_mem.out_pixel_fmt = IPU_PIX_FMT_YUV420P;
++		pr_info("YUV420\n");
++	} else if (cam->v2f.fmt.pix.pixelformat == V4L2_PIX_FMT_YUV422P) {
++		enc.mem_prp_vf_mem.out_pixel_fmt = IPU_PIX_FMT_YUV422P;
++		pr_info("YUV422P\n");
++	} else if (cam->v2f.fmt.pix.pixelformat == V4L2_PIX_FMT_YUYV) {
++		enc.mem_prp_vf_mem.out_pixel_fmt = IPU_PIX_FMT_YUYV;
++		pr_info("YUYV\n");
++	} else if (cam->v2f.fmt.pix.pixelformat == V4L2_PIX_FMT_UYVY) {
++		enc.mem_prp_vf_mem.out_pixel_fmt = IPU_PIX_FMT_UYVY;
++		pr_info("UYVY\n");
++	} else if (cam->v2f.fmt.pix.pixelformat == V4L2_PIX_FMT_NV12) {
++		enc.mem_prp_vf_mem.out_pixel_fmt = IPU_PIX_FMT_NV12;
++		pr_info("NV12\n");
++	} else if (cam->v2f.fmt.pix.pixelformat == V4L2_PIX_FMT_BGR24) {
++		enc.mem_prp_vf_mem.out_pixel_fmt = IPU_PIX_FMT_BGR24;
++		pr_info("BGR24\n");
++	} else if (cam->v2f.fmt.pix.pixelformat == V4L2_PIX_FMT_RGB24) {
++		enc.mem_prp_vf_mem.out_pixel_fmt = IPU_PIX_FMT_RGB24;
++		pr_info("RGB24\n");
++	} else if (cam->v2f.fmt.pix.pixelformat == V4L2_PIX_FMT_RGB565) {
++		enc.mem_prp_vf_mem.out_pixel_fmt = IPU_PIX_FMT_RGB565;
++		pr_info("RGB565\n");
++	} else if (cam->v2f.fmt.pix.pixelformat == V4L2_PIX_FMT_BGR32) {
++		enc.mem_prp_vf_mem.out_pixel_fmt = IPU_PIX_FMT_BGR32;
++		pr_info("BGR32\n");
++	} else if (cam->v2f.fmt.pix.pixelformat == V4L2_PIX_FMT_RGB32) {
++		enc.mem_prp_vf_mem.out_pixel_fmt = IPU_PIX_FMT_RGB32;
++		pr_info("RGB32\n");
++	} else {
++		printk(KERN_ERR "format not supported\n");
++		return -EINVAL;
++	}
++
++	enc.mem_prp_vf_mem.in_pixel_fmt = enc.mem_prp_vf_mem.out_pixel_fmt;
++        enc.mem_prp_vf_mem.motion_sel = MED_MOTION;
++        enc.mem_prp_vf_mem.field_fmt = V4L2_FIELD_INTERLACED_BT;
++
++	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_ENC, cam->csi, true, true);
++
++        //Init CSI channels
++        cam->vdi_enc_first_frame = 1;
++
++        err = ipu_init_channel(cam->ipu, CSI_MEM, &csi);
++        if (err != 0) {
++            printk(KERN_ERR "CSI_MEM ipu_init_channel %d\n", err);
++            return err;
++        }
++
++
++        err = ipu_init_channel_buffer(cam->ipu, CSI_MEM, IPU_OUTPUT_BUFFER,
++                enc.mem_prp_vf_mem.out_pixel_fmt, enc.mem_prp_vf_mem.in_width,
++                enc.mem_prp_vf_mem.in_height,
++                cam->v2f.fmt.pix.bytesperline /
++                bytes_per_pixel(enc.mem_prp_vf_mem.
++                    out_pixel_fmt), IPU_ROTATE_NONE,
++                cam->vdi_enc_bufs[cam->ping_pong_vdi], 0, 0,
++                cam->offset.u_offset,
++                cam->offset.v_offset);
++
++        if (err != 0) {
++            printk(KERN_ERR "CSI_MEM output buffer\n");
++            return err;
++        }
++
++        err = ipu_enable_channel(cam->ipu, CSI_MEM);
++        if (err < 0) {
++            printk(KERN_ERR "ipu_enable_channel CSI_MEM\n");
++            return err;
++        }
++
++        //Enable the VDI channels
++	err = ipu_init_channel(cam->ipu, MEM_VDI_PRP_VF_MEM, &enc);
++	if (err != 0) {
++		printk(KERN_ERR "MEM_VDI_PRP_VF_MEM ipu_init_channel %d\n", err);
++		return err;
++	}
++
++	err =
++		ipu_init_channel_buffer(cam->ipu, MEM_VDI_PRP_VF_MEM, IPU_INPUT_BUFFER,
++				enc.mem_prp_vf_mem.in_pixel_fmt,
++				enc.mem_prp_vf_mem.in_width,
++				enc.mem_prp_vf_mem.in_height,
++				cam->v2f.fmt.pix.bytesperline /
++				bytes_per_pixel(enc.mem_prp_vf_mem.
++					out_pixel_fmt),
++				IPU_ROTATE_NONE,
++                                cam->vdi_enc_bufs[(cam->ping_pong_vdi + 1) %3],
++                                0, 0,
++				cam->offset.u_offset,
++				cam->offset.v_offset);
++	if (err != 0) {
++		printk(KERN_ERR "MEM_VDI_PRP_VF_MEM output buffer\n");
++		return err;
++	}
++	err = ipu_enable_channel(cam->ipu, MEM_VDI_PRP_VF_MEM);
++	if (err < 0) {
++		printk(KERN_ERR "ipu_enable_channel MEM_VDI_PRP_VF_MEM\n");
++		return err;
++	}
++
++	err = ipu_init_channel(cam->ipu, MEM_VDI_PRP_VF_MEM_P, &enc);
++	if (err != 0) {
++		printk(KERN_ERR "MEM_VDI_PRP_VF_MEM_P ipu_init_channel %d\n", err);
++		return err;
++	}
++
++	err =
++		ipu_init_channel_buffer(cam->ipu, MEM_VDI_PRP_VF_MEM_P, IPU_INPUT_BUFFER,
++				enc.mem_prp_vf_mem.in_pixel_fmt,
++				enc.mem_prp_vf_mem.in_width,
++				enc.mem_prp_vf_mem.in_height,
++				cam->v2f.fmt.pix.bytesperline /
++				bytes_per_pixel(enc.mem_prp_vf_mem.
++					out_pixel_fmt),
++				IPU_ROTATE_NONE,
++				cam->vdi_enc_bufs[cam->ping_pong_vdi] + 
++                                cam->v2f.fmt.pix.bytesperline,
++                                0, 0,
++				cam->offset.u_offset,
++				cam->offset.v_offset);
++	if (err != 0) {
++		printk(KERN_ERR "MEM_VDI_PRP_VF_MEM_P input buffer\n");
++		return err;
++	}
++
++	err =
++		ipu_init_channel_buffer(cam->ipu, MEM_VDI_PRP_VF_MEM_P, IPU_OUTPUT_BUFFER,
++				enc.mem_prp_vf_mem.out_pixel_fmt,
++				enc.mem_prp_vf_mem.out_width,
++				enc.mem_prp_vf_mem.out_height,
++				enc.mem_prp_vf_mem.out_width,
++				IPU_ROTATE_NONE,
++				dummy, dummy, 0,
++				0,
++				0);
++	if (err != 0) {
++		printk(KERN_ERR "MEM_VDI_PRP_VF_MEM_P input buffer\n");
++		return err;
++	}
++
++	err = ipu_enable_channel(cam->ipu, MEM_VDI_PRP_VF_MEM_P);
++	if (err < 0) {
++		printk(KERN_ERR "ipu_enable_channel MEM_VDI_PRP_VF_MEM_P\n");
++		return err;
++	}
++	err = ipu_init_channel(cam->ipu, MEM_VDI_PRP_VF_MEM_N, &enc);
++	if (err != 0) {
++		printk(KERN_ERR "MEM_VDI_PRP_VF_MEM_N ipu_init_channel %d\n", err);
++		return err;
++	}
++
++	err =
++		ipu_init_channel_buffer(cam->ipu, MEM_VDI_PRP_VF_MEM_N, IPU_INPUT_BUFFER,
++				enc.mem_prp_vf_mem.in_pixel_fmt,
++				enc.mem_prp_vf_mem.in_width,
++				enc.mem_prp_vf_mem.in_height,
++				cam->v2f.fmt.pix.bytesperline /
++				bytes_per_pixel(enc.mem_prp_vf_mem.
++					out_pixel_fmt),
++				IPU_ROTATE_NONE,
++                                cam->vdi_enc_bufs[(cam->ping_pong_vdi + 1) %3] + 
++                                cam->v2f.fmt.pix.bytesperline,
++                                0, 0,
++				cam->offset.u_offset,
++				cam->offset.v_offset);
++	if (err != 0) {
++		printk(KERN_ERR "MEM_VDI_PRP_VF_MEM_N output buffer\n");
++		return err;
++	}
++	err = ipu_enable_channel(cam->ipu, MEM_VDI_PRP_VF_MEM_N);
++	if (err < 0) {
++		printk(KERN_ERR "ipu_enable_channel MEM_VDI_PRP_VF_MEM_N\n");
++		return err;
++	}
++	return err;
++}
++
++/*!
++ * function to update physical buffer address for encorder IDMA channel
++ *
++ * @param eba         physical buffer address for encorder IDMA channel
++ * @param buffer_num  int buffer 0 or buffer 1
++ *
++ * @return  status
++ */
++static int vdi_enc_eba_update(struct ipu_soc *ipu, dma_addr_t eba, int *buffer_num)
++{
++	int err = 0;
++
++	pr_debug("eba %x\n", eba);
++        err = ipu_update_channel_buffer(ipu, MEM_VDI_PRP_VF_MEM_P,
++                IPU_OUTPUT_BUFFER, *buffer_num,
++                eba);
++	if (err != 0) {
++            ipu_clear_buffer_ready(ipu, MEM_VDI_PRP_VF_MEM_P,
++                    IPU_OUTPUT_BUFFER,
++                    *buffer_num);
++            err = ipu_update_channel_buffer(ipu, MEM_VDI_PRP_VF_MEM_P,
++                    IPU_OUTPUT_BUFFER,
++                    *buffer_num,
++                    eba);
++
++		if (err != 0) {
++			pr_err("ERROR: v4l2 capture: fail to update "
++			       "buf%d\n", *buffer_num);
++			return err;
++		}
++	}
++
++        ipu_select_buffer(ipu, MEM_VDI_PRP_VF_MEM_P, IPU_OUTPUT_BUFFER,
++                *buffer_num);
++
++	*buffer_num = (*buffer_num == 0) ? 1 : 0;
++	return 0;
++}
++
++/*!
++ * Enable encoder task
++ * @param private       struct cam_data * mxc capture instance
++ *
++ * @return  status
++ */
++static int vdi_enc_enabling_tasks(void *private)
++{
++	cam_data *cam = (cam_data *) private;
++	int err = 0;
++        int i;
++	CAMERA_TRACE("IPU:In vdi_enc_enabling_tasks\n");
++
++	cam->dummy_frame.vaddress = dma_alloc_coherent(0,
++                               PAGE_ALIGN(cam->v2f.fmt.pix.sizeimage),
++			       &cam->dummy_frame.paddress,
++			       GFP_DMA | GFP_KERNEL);
++	if (cam->dummy_frame.vaddress == 0) {
++		pr_err("ERROR: v4l2 capture: Allocate dummy frame "
++		       "failed.\n");
++		return -ENOBUFS;
++	}
++	cam->dummy_frame.buffer.type = V4L2_BUF_TYPE_PRIVATE;
++	cam->dummy_frame.buffer.length =
++        PAGE_ALIGN(cam->v2f.fmt.pix.sizeimage);
++	cam->dummy_frame.buffer.m.offset = cam->dummy_frame.paddress;
++
++        for(i=0;i<3;i++)
++        {
++
++            cam->vdi_enc_bufs_vaddr[i] = dma_alloc_coherent(0,
++                    PAGE_ALIGN(cam->v2f.fmt.pix.sizeimage),
++                    &cam->vdi_enc_bufs[i],
++                    GFP_DMA | GFP_KERNEL);
++            if (cam->vdi_enc_bufs_vaddr[i] == 0) {
++                pr_err("ERROR: v4l2 capture: Allocate intermediate VDI frame "
++                        "failed.\n");
++                return -ENOBUFS;
++            }
++            cam->vdi_enc_buf_size[i] = PAGE_ALIGN(cam->v2f.fmt.pix.sizeimage);
++        }
++        cam->ping_pong_vdi = 0;
++
++        cam->vdi_wq = create_singlethread_workqueue("vdiq");
++        if (!cam->vdi_wq) {
++            pr_err( "Could not create VDI work queue\n");
++            err = -ENOMEM;
++            return err;
++        }
++
++        INIT_WORK(&cam->vdi_work, vdi_work_func);
++
++        ipu_clear_irq(cam->ipu, IPU_IRQ_CSI0_OUT_EOF);
++        err = ipu_request_irq(cam->ipu, IPU_IRQ_CSI0_OUT_EOF,
++                csi_enc_callback, 0, "Mxc Camera", cam);
++        if (err != 0) {
++            printk(KERN_ERR "Error registering CSI irq\n");
++            return err;
++        }
++
++        err = ipu_request_irq(cam->ipu, IPU_IRQ_PRP_VF_OUT_EOF, 
++                vdi_enc_callback, 0, "Mxc vdi", cam);
++        if (err != 0) {
++		printk(KERN_ERR "Error registering VDI irq\n");
++		return err;
++	}
++
++	err = vdi_enc_setup(cam);
++	if (err != 0) {
++		printk(KERN_ERR "vdi_enc_setup %d\n", err);
++		return err;
++	}
++
++	return err;
++}
++
++/*!
++ * Disable encoder task
++ * @param private       struct cam_data * mxc capture instance
++ *
++ * @return  int
++ */
++static int vdi_enc_disabling_tasks(void *private)
++{
++	cam_data *cam = (cam_data *) private;
++	int err = 0;
++        int i;
++
++	ipu_free_irq(cam->ipu, IPU_IRQ_CSI0_OUT_EOF, cam);
++	ipu_free_irq(cam->ipu, IPU_IRQ_PRP_VF_OUT_EOF, cam);
++
++        cancel_work_sync(&cam->vdi_work);
++        flush_workqueue(cam->vdi_wq);
++
++        destroy_workqueue(cam->vdi_wq);
++
++	err = ipu_disable_channel(cam->ipu, CSI_MEM, true);
++	err = ipu_disable_channel(cam->ipu, MEM_VDI_PRP_VF_MEM_P, true);
++	err = ipu_disable_channel(cam->ipu, MEM_VDI_PRP_VF_MEM, true);
++	err = ipu_disable_channel(cam->ipu, MEM_VDI_PRP_VF_MEM_N, true);
++
++	ipu_uninit_channel(cam->ipu, CSI_MEM);
++	ipu_uninit_channel(cam->ipu, MEM_VDI_PRP_VF_MEM_P);
++	ipu_uninit_channel(cam->ipu, MEM_VDI_PRP_VF_MEM);
++	ipu_uninit_channel(cam->ipu, MEM_VDI_PRP_VF_MEM_N);
++
++	if (cam->dummy_frame.vaddress != 0) {
++		dma_free_coherent(0, cam->dummy_frame.buffer.length,
++				  cam->dummy_frame.vaddress,
++				  cam->dummy_frame.paddress);
++		cam->dummy_frame.vaddress = 0;
++	}
++
++        for(i=0;i<3;i++)
++	{
++
++            if (cam->vdi_enc_bufs_vaddr[i] != 0) {
++                dma_free_coherent(0, cam->vdi_enc_buf_size[i],
++                        cam->vdi_enc_bufs_vaddr[i],
++                        cam->vdi_enc_bufs[i]);
++                cam->vdi_enc_bufs_vaddr[i] = 0;
++            }
++        }
++
++	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_ENC, cam->csi, false, false);
++
++	return err;
++}
++
++/*!
++ * Enable csi
++ * @param private       struct cam_data * mxc capture instance
++ *
++ * @return  status
++ */
++static int vdi_enc_enable_csi(void *private)
++{
++	cam_data *cam = (cam_data *) private;
++
++	return ipu_enable_csi(cam->ipu, cam->csi);
++}
++
++/*!
++ * Disable csi
++ * @param private       struct cam_data * mxc capture instance
++ *
++ * @return  status
++ */
++static int vdi_enc_disable_csi(void *private)
++{
++	cam_data *cam = (cam_data *) private;
++
++	return ipu_disable_csi(cam->ipu, cam->csi);
++}
++
++/*!
++ * function to select PRP-ENC as the working path
++ *
++ * @param private       struct cam_data * mxc capture instance
++ *
++ * @return  int
++ */
++int vdi_enc_select(void *private)
++{
++	cam_data *cam = (cam_data *) private;
++	int err = 0;
++
++	if (cam) {
++		cam->enc_update_eba = vdi_enc_eba_update;
++		cam->enc_enable = vdi_enc_enabling_tasks;
++		cam->enc_disable = vdi_enc_disabling_tasks;
++		cam->enc_enable_csi = vdi_enc_enable_csi;
++		cam->enc_disable_csi = vdi_enc_disable_csi;
++	} else {
++		err = -EIO;
++	}
++
++	return err;
++}
++
++/*!
++ * function to de-select VDI-ENC as the working path
++ *
++ * @param private       struct cam_data * mxc capture instance
++ *
++ * @return  int
++ */
++int vdi_enc_deselect(void *private)
++{
++	cam_data *cam = (cam_data *) private;
++	int err = 0;
++
++	if (cam) {
++		cam->enc_update_eba = NULL;
++		cam->enc_enable = NULL;
++		cam->enc_disable = NULL;
++		cam->enc_enable_csi = NULL;
++		cam->enc_disable_csi = NULL;
++		if (cam->rot_enc_bufs_vaddr[0]) {
++			dma_free_coherent(0, cam->rot_enc_buf_size[0],
++					  cam->rot_enc_bufs_vaddr[0],
++					  cam->rot_enc_bufs[0]);
++			cam->rot_enc_bufs_vaddr[0] = NULL;
++			cam->rot_enc_bufs[0] = 0;
++		}
++		if (cam->rot_enc_bufs_vaddr[1]) {
++			dma_free_coherent(0, cam->rot_enc_buf_size[1],
++					  cam->rot_enc_bufs_vaddr[1],
++					  cam->rot_enc_bufs[1]);
++			cam->rot_enc_bufs_vaddr[1] = NULL;
++			cam->rot_enc_bufs[1] = 0;
++		}
++	}
++
++	return err;
++}
++
++/*!
++ * Init the Encoder channels
++ *
++ * @return  Error code indicating success or failure
++ */
++__init int vdi_enc_init(void)
++{
++	return 0;
++}
++
++/*!
++ * Deinit the Encoder channels
++ *
++ */
++void __exit vdi_enc_exit(void)
++{
++}
++
++module_init(vdi_enc_init);
++module_exit(vdi_enc_exit);
++
++EXPORT_SYMBOL(vdi_enc_select);
++EXPORT_SYMBOL(vdi_enc_deselect);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("IPU VDI ENC Driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index b2ece92..e80d488 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -48,7 +48,7 @@ static cam_data *g_cam;
+ 
+ /*! This data is used for the output to the display. */
+ #define MXC_V4L2_CAPTURE_NUM_OUTPUTS	3
+-#define MXC_V4L2_CAPTURE_NUM_INPUTS	2
++#define MXC_V4L2_CAPTURE_NUM_INPUTS	3
+ static struct v4l2_output mxc_capture_outputs[MXC_V4L2_CAPTURE_NUM_OUTPUTS] = {
+ 	{
+ 	 .index = 0,
+@@ -95,6 +95,15 @@ static struct v4l2_input mxc_capture_inputs[MXC_V4L2_CAPTURE_NUM_INPUTS] = {
+ 	 .std = V4L2_STD_UNKNOWN,
+ 	 .status = V4L2_IN_ST_NO_POWER,
+ 	 },
++         {
++	 .index = 2,
++	 .name = "CSI VDI MEM",
++	 .type = V4L2_INPUT_TYPE_CAMERA,
++	 .audioset = 0,
++	 .tuner = 0,
++	 .std = V4L2_STD_UNKNOWN,
++	 .status = V4L2_IN_ST_NO_POWER,
++	 }
+ };
+ 
+ /*! List of TV input video formats supported. The video formats is corresponding
+@@ -750,8 +759,10 @@ static int mxc_v4l2_s_fmt(cam_data *cam, struct v4l2_format *f)
+ 		 * Force the capture window resolution to be crop bounds
+ 		 * for CSI MEM input mode.
+ 		 */
+-		if (strcmp(mxc_capture_inputs[cam->current_input].name,
+-			   "CSI MEM") == 0) {
++                if (strcmp(mxc_capture_inputs[cam->current_input].name,
++                            "CSI MEM") == 0 || 
++                        strcmp(mxc_capture_inputs[cam->current_input].name,
++                            "CSI VDI MEM") == 0) {
+ 			f->fmt.pix.width = cam->crop_current.width;
+ 			f->fmt.pix.height = cam->crop_current.height;
+ 		}
+@@ -1553,6 +1564,11 @@ static int mxc_v4l_open(struct file *file)
+ #if defined(CONFIG_MXC_IPU_PRP_ENC) || defined(CONFIG_MXC_IPU_PRP_ENC_MODULE)
+ 			err = prp_enc_select(cam);
+ #endif
++		} else if (strcmp(mxc_capture_inputs[cam->current_input].name,
++				  "CSI VDI MEM") == 0) {
++#if defined(CONFIG_MXC_IPU_VDI_ENC) || defined(CONFIG_MXC_IPU_VDI_ENC_MODULE)
++			err = vdi_enc_select(cam);
++#endif
+ 		}
+ 
+ 		cam->enc_counter = 0;
+@@ -1701,6 +1717,11 @@ static int mxc_v4l_close(struct file *file)
+ #if defined(CONFIG_MXC_IPU_PRP_ENC) || defined(CONFIG_MXC_IPU_PRP_ENC_MODULE)
+ 			err |= prp_enc_deselect(cam);
+ #endif
++		} else if (strcmp(mxc_capture_inputs[cam->current_input].name,
++				  "CSI VDI MEM") == 0) {
++#if defined(CONFIG_MXC_IPU_PRP_ENC) || defined(CONFIG_MXC_IPU_PRP_ENC_MODULE)
++			err |= vdi_enc_deselect(cam);
++#endif
+ 		}
+ 
+ 		mxc_free_frame_buf(cam);
+@@ -2274,6 +2295,13 @@ static long mxc_v4l_do_ioctl(struct file *file,
+ 			if (retval)
+ 				break;
+ #endif
++		} else if (strcmp(mxc_capture_inputs[*index].name,
++				  "CSI VDI MEM") == 0) {
++#if defined(CONFIG_MXC_IPU_PRP_ENC) || defined(CONFIG_MXC_IPU_PRP_ENC_MODULE)
++			retval = vdi_enc_select(cam);
++			if (retval)
++				break;
++#endif
+ 		}
+ 
+ 		mxc_capture_inputs[*index].status &= ~V4L2_IN_ST_NO_POWER;
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+index 5b7b0bf..32c1b5c 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+@@ -109,6 +109,7 @@ typedef struct _cam_data {
+ 	struct list_head done_q;
+ 	struct list_head working_q;
+ 	int ping_pong_csi;
++	int ping_pong_vdi;
+ 	spinlock_t queue_int_lock;
+ 	spinlock_t dqueue_int_lock;
+ 	struct mxc_v4l_frame frame[FRAME_NUM];
+@@ -119,6 +120,10 @@ typedef struct _cam_data {
+ 	dma_addr_t rot_enc_bufs[2];
+ 	void *rot_enc_bufs_vaddr[2];
+ 	int rot_enc_buf_size[2];
++	dma_addr_t vdi_enc_bufs[3];
++	void *vdi_enc_bufs_vaddr[3];
++	int vdi_enc_buf_size[3];
++        int vdi_enc_first_frame;
+ 	enum v4l2_buf_type type;
+ 
+ 	/* still image capture */
+@@ -191,6 +196,8 @@ typedef struct _cam_data {
+ 	wait_queue_head_t power_queue;
+ 	unsigned int csi;
+ 	int current_input;
++        struct workqueue_struct *vdi_wq;
++        struct work_struct vdi_work;
+ 
+ 	/* camera sensor interface */
+ 	struct camera_sensor *cam_sensor; 	/* old version */
