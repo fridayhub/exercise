@@ -1,0 +1,4 @@
+*/30 * * * *  /etc/httpPost
+*/2 * * * * /etc/ipChange
+* * * * * ntpdate 1.cn.pool.ntp.org
+0 1 * * * find /data/*.log -mtime +10 -exec rm -f {} \;

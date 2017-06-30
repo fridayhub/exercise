@@ -1,0 +1,11 @@
+defaultroute
+usepeerdns
+noipdefault
+noauth
+ipcp-max-failure 30
+lcp-echo-interval 30
+lcp-echo-failure 3
+115200
+/dev/ttyUSB0
+debug
+connect '/sbin/chat -s -v -f /etc/ppp/chat/connect-chat'

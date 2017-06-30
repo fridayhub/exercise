@@ -1,0 +1,4 @@
+#!/bin/sh
+OPTION_FILE="zte_options"
+DIALER_SCRIPT=$(pwd)/zte_ppp_dialer
+exec /sbin/pppd file $OPTION_FILE connect "/sbin/chat -v -f ${DIALER_SCRIPT}"
