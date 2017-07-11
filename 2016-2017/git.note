@@ -3,3 +3,4 @@ $ git push origin test:test              // 提交本地test分支作为远程�
 git checkout -b local-branchname origin/remote_branchname // 就可以将远程分支映射到本地命名为local-branchname 
 
 git --bare init /home/git/myRep.git,初始化化仓库
+git diff --name-status //just display name 
